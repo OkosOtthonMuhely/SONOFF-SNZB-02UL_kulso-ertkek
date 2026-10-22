@@ -39,8 +39,11 @@ blueprint:
                 - domain: sensor
                   device_class: humidity
         outdoor_pressure:
-          name: Külső légnyomás
-          description: hPa, mbar, kPa, Pa, inHg és mmHg egységet is kezel (átváltja hPa-ra).
+          name: Külső légnyomás (nem kötelező)
+          description: >
+            Hagyd üresen, ha nincs légnyomás szenzorod. hPa, mbar, kPa, Pa,
+            inHg és mmHg egységet is kezel (átváltja hPa-ra).
+          default: ""
           selector:
             entity:
               filter:
@@ -72,7 +75,9 @@ blueprint:
               filter:
                 - domain: number
         target_pressure:
-          name: Remote pressure (number)
+          name: Remote pressure (number) (nem kötelező)
+          description: Csak akkor kell, ha van külső légnyomás szenzorod.
+          default: ""
           selector:
             entity:
               filter:
@@ -154,8 +159,8 @@ triggers:
     entity_id: !input outdoor_temp
   - trigger: state
     entity_id: !input outdoor_humidity
-  - trigger: state
-    entity_id: !input outdoor_pressure
+  # A légnyomás lassan változik és opcionális, ezért nincs külön triggere:
+  # a 30 percenkénti időzítés frissíti.
   - trigger: state
     entity_id: !input weather_entity
   - trigger: time_pattern
@@ -190,7 +195,10 @@ actions:
           value: >
             {{ ([[states(hum_entity) | float(0), 5] | max, 95] | min) | round(0) | int }}
 
-  - if: "{{ is_number(states(press_entity)) }}"
+  - if: >
+      {{ press_entity not in ['', none]
+         and target_pressure not in ['', none]
+         and is_number(states(press_entity)) }}
     then:
       - action: number.set_value
         target:
