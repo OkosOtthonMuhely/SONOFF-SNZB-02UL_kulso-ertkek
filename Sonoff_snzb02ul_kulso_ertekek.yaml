@@ -16,7 +16,8 @@ blueprint:
     helyett ezek jelennek meg. A szenzor elemes (alvó) eszköz, ezért az
     értékeket lehet, hogy csak ébredéskor fogadja el.
   domain: automation
-  min_version: 2024.10.0
+  homeassistant:
+    min_version: 2024.10.0
   input:
     source_section:
       name: Külső értékek forrása
