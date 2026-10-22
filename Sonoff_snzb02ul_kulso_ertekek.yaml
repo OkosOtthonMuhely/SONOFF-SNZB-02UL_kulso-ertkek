@@ -1,0 +1,212 @@
+blueprint:
+  name: Sonoff SNZB-02UL – külső értékek és időjárás ikon
+  author: OkosOtthon Műhely
+  description: >
+    A Sonoff SNZB-02UL e-ink kijelzőjére kiírja a külső hőmérsékletet,
+    páratartalmat és légnyomást, valamint a kiválasztott Home Assistant
+    időjárás entitás alapján beállítja a megfelelő időjárás ikont.
+
+
+    A szenzor Zigbee2MQTT-n keresztül működik. Az entitások a
+    `remote_temperature`, `remote_humidity`, `remote_pressure`,
+    `remote_sensors_state` és `weather` végződésű number/select entitások.
+
+
+    Figyelem: ha a külső értékek be vannak kapcsolva, a kijelzőn a dátum
+    helyett ezek jelennek meg. A szenzor elemes (alvó) eszköz, ezért az
+    értékeket lehet, hogy csak ébredéskor fogadja el.
+  domain: automation
+  min_version: 2024.10.0
+  input:
+    source_section:
+      name: Külső értékek forrása
+      icon: mdi:weather-partly-cloudy
+      collapsed: false
+      input:
+        outdoor_temp:
+          name: Külső hőmérséklet
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: temperature
+        outdoor_humidity:
+          name: Külső páratartalom
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: humidity
+        outdoor_pressure:
+          name: Külső légnyomás
+          description: hPa, mbar, kPa, Pa, inHg és mmHg egységet is kezel (átváltja hPa-ra).
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: [pressure, atmospheric_pressure]
+        weather_entity:
+          name: Időjárás entitás
+          description: >
+            Ez alapján lesz az ikon: napos, részben felhős, borult, eső, hó, szeles.
+          selector:
+            entity:
+              filter:
+                - domain: weather
+    target_section:
+      name: SNZB-02UL entitások (Zigbee2MQTT)
+      icon: mdi:zigbee
+      collapsed: false
+      input:
+        target_temp:
+          name: Remote temperature (number)
+          selector:
+            entity:
+              filter:
+                - domain: number
+        target_humidity:
+          name: Remote humidity (number)
+          selector:
+            entity:
+              filter:
+                - domain: number
+        target_pressure:
+          name: Remote pressure (number)
+          selector:
+            entity:
+              filter:
+                - domain: number
+        target_weather:
+          name: Weather (select)
+          selector:
+            entity:
+              filter:
+                - domain: select
+        target_remote_state:
+          name: Remote sensors state (select)
+          selector:
+            entity:
+              filter:
+                - domain: select
+    options_section:
+      name: Beállítások
+      icon: mdi:cog
+      collapsed: true
+      input:
+        enable_remote:
+          name: Külső értékek bekapcsolása a kijelzőn
+          description: Minden futáskor "enable" értéket küld a Remote sensors state-nek.
+          default: true
+          selector:
+            boolean: {}
+        min_interval:
+          name: Minimális frissítési időköz
+          description: >
+            Ennyi időnként küld legfeljebb új értéket a szenzornak (az elem védelmében).
+          default:
+            hours: 0
+            minutes: 10
+            seconds: 0
+          selector:
+            duration: {}
+
+mode: single
+max_exceeded: silent
+
+variables:
+  temp_entity: !input outdoor_temp
+  hum_entity: !input outdoor_humidity
+  press_entity: !input outdoor_pressure
+  weather_entity: !input weather_entity
+  target_temp: !input target_temp
+  target_humidity: !input target_humidity
+  target_pressure: !input target_pressure
+  target_weather: !input target_weather
+  target_remote_state: !input target_remote_state
+  enable_remote: !input enable_remote
+  weather_map:
+    sunny: sunny
+    clear-night: sunny
+    partlycloudy: partly_cloudy
+    cloudy: overcast
+    fog: overcast
+    exceptional: overcast
+    rainy: rain
+    pouring: rain
+    lightning: rain
+    lightning-rainy: rain
+    hail: rain
+    snowy: snow
+    snowy-rainy: snow
+    windy: windy
+    windy-variant: windy
+  pressure_factor:
+    hPa: 1
+    mbar: 1
+    kPa: 10
+    Pa: 0.01
+    inHg: 33.8639
+    mmHg: 1.33322
+
+triggers:
+  - trigger: state
+    entity_id: !input outdoor_temp
+  - trigger: state
+    entity_id: !input outdoor_humidity
+  - trigger: state
+    entity_id: !input outdoor_pressure
+  - trigger: state
+    entity_id: !input weather_entity
+  - trigger: time_pattern
+    minutes: "/30"
+  - trigger: homeassistant
+    event: start
+
+actions:
+  - if: "{{ enable_remote }}"
+    then:
+      - action: select.select_option
+        target:
+          entity_id: "{{ target_remote_state }}"
+        data:
+          option: enable
+
+  - if: "{{ is_number(states(temp_entity)) }}"
+    then:
+      - action: number.set_value
+        target:
+          entity_id: "{{ target_temp }}"
+        data:
+          value: >
+            {{ ([[states(temp_entity) | float(0), -20] | max, 60] | min) | round(1) }}
+
+  - if: "{{ is_number(states(hum_entity)) }}"
+    then:
+      - action: number.set_value
+        target:
+          entity_id: "{{ target_humidity }}"
+        data:
+          value: >
+            {{ ([[states(hum_entity) | float(0), 5] | max, 95] | min) | round(0) | int }}
+
+  - if: "{{ is_number(states(press_entity)) }}"
+    then:
+      - action: number.set_value
+        target:
+          entity_id: "{{ target_pressure }}"
+        data:
+          value: >
+            {% set unit = state_attr(press_entity, 'unit_of_measurement') %}
+            {% set hpa = states(press_entity) | float(0) * pressure_factor.get(unit, 1) %}
+            {{ ([[hpa, 700] | max, 1100] | min) | round(0) | int }}
+
+  - if: "{{ weather_map.get(states(weather_entity), '') != '' }}"
+    then:
+      - action: select.select_option
+        target:
+          entity_id: "{{ target_weather }}"
+        data:
+          option: "{{ weather_map.get(states(weather_entity)) }}"
+
+  # Frekvencia-korlát: a "single" mód miatt a késleltetés alatt jövő triggerek elmaradnak
+  - delay: !input min_interval
